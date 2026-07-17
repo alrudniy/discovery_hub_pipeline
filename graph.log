@@ -1,0 +1,4 @@
+nohup: ignoring input
+Built graph: 1602022 nodes, 4867373 edges from 603369 docs -> /home/alex/discovery_hub/data/graph
+  nodes by type: {'technology': 600738, 'inventor': 323242, 'organization': 195557, 'expert': 213687, 'facility': 268798}
+  edges by rel : {'invented_by': 1164355, 'assigned_to': 786000, 'investigated_by': 262551, 'located_at': 1187011, 'affiliated_with': 1467456}

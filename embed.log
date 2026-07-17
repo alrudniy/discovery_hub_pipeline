@@ -18,3 +18,29 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
   [cuda:0] shard    5 (20000 docs) 320.4s
   [cuda:1] shard    6 (20000 docs) 320.7s
   [cuda:0] shard    7 (20000 docs) 449.2s
+  [cuda:1] shard    8 (20000 docs) 459.2s
+  [cuda:0] shard    9 (20000 docs) 468.6s
+  [cuda:1] shard   10 (20000 docs) 472.2s
+  [cuda:0] shard   11 (20000 docs) 469.0s
+  [cuda:1] shard   12 (20000 docs) 465.2s
+  [cuda:0] shard   13 (20000 docs) 476.2s
+  [cuda:1] shard   14 (20000 docs) 469.6s
+  [cuda:0] shard   15 (20000 docs) 476.9s
+  [cuda:1] shard   16 (20000 docs) 466.9s
+  [cuda:0] shard   17 (20000 docs) 470.1s
+  [cuda:1] shard   18 (20000 docs) 466.3s
+  [cuda:0] shard   19 (20000 docs) 476.2s
+  [cuda:1] shard   20 (20000 docs) 466.6s
+  [cuda:0] shard   21 (20000 docs) 464.7s
+  [cuda:1] shard   22 (20000 docs) 527.8s
+  [cuda:0] shard   23 (20000 docs) 535.2s
+  [cuda:1] shard   24 (20000 docs) 542.0s
+  [cuda:0] shard   25 (20000 docs) 551.7s
+  [cuda:1] shard   26 (20000 docs) 543.2s
+  [cuda:0] shard   27 (20000 docs) 596.9s
+  [cuda:1] shard   28 (20000 docs) 675.5s
+  [cuda:1] shard   30 (3369 docs) 112.9s
+  [cuda:0] shard   29 (20000 docs) 663.9s
+combining shards ...
+Wrote vectors (603369, 1024) -> /home/alex/discovery_hub/data/embeddings/doc_vectors.npy
+  removed shard dir (pass --keep-shards to retain for resume)

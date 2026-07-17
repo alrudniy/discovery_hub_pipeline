@@ -1,0 +1,70 @@
+nohup: ignoring input
+Loading weights:   0%|          | 0/310 [00:00<?, ?it/s]Loading weights: 100%|██████████| 310/310 [00:00<00:00, 7088.76it/s]
+/home/alex/discovery_hub_pipeline/discovery_hub/embedding.py:133: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self.model.get_sentence_embedding_dimension()
+  [warn] no R-GCN node embeddings found (run stage 06) -- comparing dense vs hybrid only, no graph arm.
+Evaluating 2 system(s) on 7545 queries [curated (synthetic_queries.jsonl.eval.jsonl)] ...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/393 [00:00<?, ?it/s]Loading weights: 100%|██████████| 393/393 [00:00<00:00, 5412.57it/s]
+
+# Discovery Hub -- Retrieval Quality Report
+_Generated 2026-07-11T09:15:58 | mode=real | queries=7545 | labels=curated (synthetic_queries.jsonl.eval.jsonl)_
+
+## What this measures
+Whether retrieval returns the right documents, and whether a change **helps** -- every comparison carries a 95% bootstrap confidence interval and a paired Wilcoxon p-value, so a lift is reported as `+X.XXX [lo, hi], p=...` rather than asserted.
+
+## Scorecard (mean [95% CI])
+
+| Metric | dense | hybrid |
+|---|---|---|
+| recall@1 | 0.139 [0.131, 0.146] | 0.090 [0.084, 0.096] |
+| recall@5 | 0.320 [0.309, 0.331] | 0.226 [0.216, 0.235] |
+| recall@10 | 0.415 [0.404, 0.425] | 0.304 [0.294, 0.315] |
+| recall@20 | 0.509 [0.498, 0.520] | 0.407 [0.396, 0.417] |
+| recall@50 | 0.635 [0.624, 0.646] | 0.590 [0.579, 0.602] |
+| precision@10 | 0.041 [0.040, 0.043] | 0.030 [0.029, 0.031] |
+| mrr@10 | 0.218 [0.210, 0.226] | 0.149 [0.142, 0.155] |
+| ndcg@10 | 0.265 [0.256, 0.273] | 0.185 [0.179, 0.193] |
+| map | 0.229 [0.221, 0.236] | 0.162 [0.155, 0.168] |
+
+## Does it help? hybrid vs dense
+
+| Metric | Δ (cand − base) | 95% CI | p | verdict |
+|---|---|---|---|---|
+| recall@1 | -0.049 | [-0.054, -0.043] | 0.000 | hurts ✗ |
+| recall@5 | -0.095 | [-0.102, -0.087] | 0.000 | hurts ✗ |
+| recall@10 | -0.110 | [-0.118, -0.102] | 0.000 | hurts ✗ |
+| recall@20 | -0.102 | [-0.110, -0.094] | 0.000 | hurts ✗ |
+| recall@50 | -0.044 | [-0.051, -0.037] | 0.000 | hurts ✗ |
+| precision@10 | -0.011 | [-0.012, -0.010] | 0.000 | hurts ✗ |
+| mrr@10 | -0.069 | [-0.074, -0.065] | 0.000 | hurts ✗ |
+| ndcg@10 | -0.079 | [-0.084, -0.074] | 0.000 | hurts ✗ |
+| map | -0.067 | [-0.071, -0.063] | 0.000 | hurts ✗ |
+
+## How to read this
+- **Recall@k**: did the right document make the top-k. The headline quality number for a retrieve-then-rerank system.
+- **MRR@10 / nDCG@10**: how high the right document ranked.
+- **Δ with CI + p**: the honest form of "+20% Precision@10" -- a measured lift with uncertainty, on the same queries, paired. A wide CI that crosses 0 means "not enough evidence yet", not "better".
+- Swap in **curated qrels** (`--qrels`) and re-run to report numbers you can put in front of an investor.
+
+## Reproducibility configuration in force
+```json
+{
+  "seed": 20240611,
+  "strict_deterministic": true,
+  "PYTHONHASHSEED": "20240611",
+  "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+  "numpy_version": "2.5.0",
+  "torch_configured": true,
+  "guarantees": {
+    "byte_identical_same_stack": "embeddings & exact (FAISS Flat) retrieval: yes. LLM greedy decode: only with batch-invariant kernels + fixed batch size.",
+    "byte_identical_cross_hardware": "no (float non-associativity across GPU arch / driver / library versions).",
+    "semantic_stability": "yes, and measured in 09_stability_harness.py."
+  },
+  "torch_version": "2.6.0+cu124",
+  "cuda_available": true,
+  "gpu_name": "NVIDIA GeForce RTX 3060"
+}
+```
+
+Wrote /home/alex/discovery_hub/data/reports/eval_report.json, .md, and eval_qrels.jsonl

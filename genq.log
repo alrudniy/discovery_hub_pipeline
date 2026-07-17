@@ -1,0 +1,55 @@
+nohup: ignoring input
+generate_queries: docs=/home/alex/discovery_hub/data/normalized/docs.jsonl out=/home/alex/discovery_hub/data/finetune/synthetic_queries.jsonl
+  sources=['sbir', 'uspto'] n_queries=3 eval_frac=0.1 max_docs=25000 generator=glm-4.5  @ https://api.z.ai/api/paas/v4
+  RESUMING: 1301 doc(s) already done -> skipping them, appending.
+  scanned 172544 docs; 23699 to process (concurrency=8)
+  processed 500 new (1801 total) | train_pairs=1360 eval_pairs=114 failed=0 | 0.6 docs/s
+  processed 1000 new (2301 total) | train_pairs=2643 eval_pairs=289 failed=0 | 0.7 docs/s
+  processed 1500 new (2801 total) | train_pairs=3947 eval_pairs=451 failed=0 | 0.7 docs/s
+  processed 2000 new (3301 total) | train_pairs=5301 eval_pairs=586 failed=0 | 0.7 docs/s
+  processed 2500 new (3801 total) | train_pairs=6618 eval_pairs=736 failed=0 | 0.7 docs/s
+  processed 3000 new (4301 total) | train_pairs=7931 eval_pairs=898 failed=0 | 0.7 docs/s
+  processed 3500 new (4801 total) | train_pairs=9238 eval_pairs=1065 failed=0 | 0.7 docs/s
+  processed 4000 new (5301 total) | train_pairs=10514 eval_pairs=1269 failed=0 | 0.7 docs/s
+  processed 4500 new (5801 total) | train_pairs=11852 eval_pairs=1410 failed=0 | 0.7 docs/s
+  processed 5000 new (6301 total) | train_pairs=13118 eval_pairs=1620 failed=0 | 0.7 docs/s
+  processed 5500 new (6801 total) | train_pairs=14451 eval_pairs=1744 failed=0 | 0.7 docs/s
+  processed 6000 new (7301 total) | train_pairs=15733 eval_pairs=1939 failed=0 | 0.7 docs/s
+  processed 6500 new (7801 total) | train_pairs=17043 eval_pairs=2095 failed=0 | 0.7 docs/s
+  processed 7000 new (8301 total) | train_pairs=18369 eval_pairs=2245 failed=0 | 0.7 docs/s
+  processed 7500 new (8801 total) | train_pairs=19733 eval_pairs=2365 failed=0 | 0.7 docs/s
+  processed 8000 new (9301 total) | train_pairs=21052 eval_pairs=2521 failed=0 | 0.7 docs/s
+  processed 8500 new (9801 total) | train_pairs=22386 eval_pairs=2656 failed=0 | 0.7 docs/s
+  processed 9000 new (10301 total) | train_pairs=23696 eval_pairs=2821 failed=0 | 0.7 docs/s
+  processed 9500 new (10801 total) | train_pairs=25047 eval_pairs=2953 failed=0 | 0.7 docs/s
+  processed 10000 new (11301 total) | train_pairs=26388 eval_pairs=3091 failed=0 | 0.7 docs/s
+  processed 10500 new (11801 total) | train_pairs=27692 eval_pairs=3256 failed=0 | 0.7 docs/s
+  processed 11000 new (12301 total) | train_pairs=29014 eval_pairs=3406 failed=0 | 0.7 docs/s
+  processed 11500 new (12801 total) | train_pairs=30389 eval_pairs=3514 failed=0 | 0.7 docs/s
+  processed 12000 new (13301 total) | train_pairs=31740 eval_pairs=3637 failed=0 | 0.7 docs/s
+  processed 12500 new (13801 total) | train_pairs=33066 eval_pairs=3787 failed=0 | 0.7 docs/s
+  processed 13000 new (14301 total) | train_pairs=34371 eval_pairs=3970 failed=0 | 0.7 docs/s
+  processed 13500 new (14801 total) | train_pairs=35699 eval_pairs=4129 failed=0 | 0.7 docs/s
+  processed 14000 new (15301 total) | train_pairs=37061 eval_pairs=4249 failed=0 | 0.7 docs/s
+  processed 14500 new (15801 total) | train_pairs=38429 eval_pairs=4360 failed=0 | 0.7 docs/s
+  processed 15000 new (16301 total) | train_pairs=39750 eval_pairs=4516 failed=0 | 0.7 docs/s
+  processed 15500 new (16801 total) | train_pairs=41082 eval_pairs=4660 failed=0 | 0.7 docs/s
+  processed 16000 new (17301 total) | train_pairs=42416 eval_pairs=4792 failed=0 | 0.7 docs/s
+  processed 16500 new (17801 total) | train_pairs=43730 eval_pairs=4947 failed=0 | 0.7 docs/s
+  processed 17000 new (18301 total) | train_pairs=45032 eval_pairs=5121 failed=0 | 0.7 docs/s
+  processed 17500 new (18801 total) | train_pairs=46389 eval_pairs=5238 failed=0 | 0.7 docs/s
+  processed 18000 new (19301 total) | train_pairs=47722 eval_pairs=5388 failed=0 | 0.7 docs/s
+  processed 18500 new (19801 total) | train_pairs=49044 eval_pairs=5541 failed=0 | 0.7 docs/s
+  processed 19000 new (20301 total) | train_pairs=50374 eval_pairs=5688 failed=0 | 0.7 docs/s
+  processed 19500 new (20801 total) | train_pairs=51717 eval_pairs=5817 failed=0 | 0.7 docs/s
+  processed 20000 new (21301 total) | train_pairs=53022 eval_pairs=5979 failed=0 | 0.7 docs/s
+  processed 20500 new (21801 total) | train_pairs=54327 eval_pairs=6144 failed=0 | 0.7 docs/s
+  processed 21000 new (22301 total) | train_pairs=55635 eval_pairs=6312 failed=0 | 0.7 docs/s
+  processed 21500 new (22801 total) | train_pairs=56960 eval_pairs=6459 failed=0 | 0.7 docs/s
+  processed 22000 new (23301 total) | train_pairs=58250 eval_pairs=6636 failed=0 | 0.7 docs/s
+  processed 22500 new (23801 total) | train_pairs=59572 eval_pairs=6789 failed=0 | 0.7 docs/s
+  processed 23000 new (24301 total) | train_pairs=60917 eval_pairs=6921 failed=0 | 0.7 docs/s
+  processed 23500 new (24801 total) | train_pairs=62246 eval_pairs=7062 failed=0 | 0.7 docs/s
+
+done. new docs=23699 (total 25000) | train pairs=62764 -> /home/alex/discovery_hub/data/finetune/synthetic_queries.jsonl
+      eval pairs=7128 -> /home/alex/discovery_hub/data/finetune/synthetic_queries.jsonl.eval.jsonl

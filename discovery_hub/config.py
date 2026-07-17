@@ -58,18 +58,60 @@ RERANK_MODEL = os.environ.get("DH_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 LLM_MODEL = os.environ.get("DH_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
 # --------------------------------------------------------------------------- #
+# Env parsing helpers
+# --------------------------------------------------------------------------- #
+_FALSEY = {"0", "false", "no", "off", ""}
+
+
+def env_bool(name: str, default: bool) -> bool:
+    """
+    Parse a boolean env var. "0"/"false"/"no"/"off"/"" -> False, anything else
+    -> True. Case-insensitive. Returns `default` when the var is unset, so every
+    caller keeps its current behaviour on a bare environment.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in _FALSEY
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    return default if raw is None else int(raw)
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    return default if raw is None else float(raw)
+
+
+def _env_dir(name: str, default: Path) -> Path:
+    """A per-directory override, defaulting to the DATA_ROOT-derived path."""
+    raw = os.environ.get(name)
+    return default if raw is None else Path(raw).resolve()
+
+
+# --------------------------------------------------------------------------- #
 # Paths -- everything lives under DH_DATA_ROOT (override with an env var so the
 # same code points at Drew local disk or Anvil scratch without edits).
+#
+# WHY the per-directory overrides exist: the artifacts of this project are NOT
+# all under one root any more. The merged knowledge graph (1.49M nodes / 4.52M
+# edges) and its R-GCN embeddings live under `data_merged/`, while the doc
+# embeddings and the FAISS/BM25 index live under `data/`. A single DH_DATA_ROOT
+# physically cannot address both, so each directory gets its own override that
+# defaults to the DATA_ROOT-derived path. With no env vars set, every path below
+# resolves exactly as it did before -- these overrides are purely additive.
 # --------------------------------------------------------------------------- #
 DATA_ROOT = Path(os.environ.get("DH_DATA_ROOT", "./data")).resolve()
 
-RAW_DIR = DATA_ROOT / "raw"            # 01 -> heterogeneous source records (JSONL)
-NORM_DIR = DATA_ROOT / "normalized"   # 02 -> unified DiscoveryDoc records (JSONL)
-GRAPH_DIR = DATA_ROOT / "graph"       # 03 -> nodes.jsonl, edges.jsonl, graph_meta.json
-EMB_DIR = DATA_ROOT / "embeddings"    # 04 -> doc_vectors.npy + doc_ids.json
-INDEX_DIR = DATA_ROOT / "index"       # 05 -> faiss.index (or mock_index.npz)
-ARTIFACT_DIR = DATA_ROOT / "artifacts"  # 06 -> rgcn_node_emb.npy + node_ids.json
-REPORT_DIR = DATA_ROOT / "reports"    # 09 -> stability_report.json / .md
+RAW_DIR = _env_dir("DH_RAW_DIR", DATA_ROOT / "raw")          # 01 -> raw source records (JSONL)
+NORM_DIR = _env_dir("DH_NORM_DIR", DATA_ROOT / "normalized")  # 02 -> DiscoveryDoc records (JSONL)
+GRAPH_DIR = _env_dir("DH_GRAPH_DIR", DATA_ROOT / "graph")     # 03 -> nodes/edges.jsonl, graph_meta.json
+EMB_DIR = _env_dir("DH_EMB_DIR", DATA_ROOT / "embeddings")    # 04 -> doc_vectors.npy + doc_ids.json
+INDEX_DIR = _env_dir("DH_INDEX_DIR", DATA_ROOT / "index")     # 05 -> faiss.index (or mock_index.npz)
+ARTIFACT_DIR = _env_dir("DH_ARTIFACT_DIR", DATA_ROOT / "artifacts")  # 06 -> rgcn_node_emb.npy + node_ids.json
+REPORT_DIR = _env_dir("DH_REPORT_DIR", DATA_ROOT / "reports")  # 09 -> stability_report.json / .md
 
 ALL_DIRS = [RAW_DIR, NORM_DIR, GRAPH_DIR, EMB_DIR, INDEX_DIR, ARTIFACT_DIR, REPORT_DIR]
 
@@ -147,20 +189,47 @@ OPENALEX_BIOMED_CONCEPTS = {
 # --------------------------------------------------------------------------- #
 @dataclass
 class RetrievalConfig:
-    top_k_recall: int = 50      # first-stage retrieval depth per signal
-    top_k_rerank: int = 10      # after cross-encoder rerank
-    min_confidence: float = 0.35  # Layer-3 policy gate
-    # Hybrid retrieval: dense + BM25 keyword, fused by Reciprocal Rank Fusion,
-    # with an entity-linked graph signal that abstains when nothing links.
-    use_keyword: bool = True    # include the BM25 keyword half (the "hybrid")
-    # Graph signal OFF by default: on the only evidence we have (stage 10 over the
-    # synthetic eval), the entity-linked R-GCN signal does NOT improve retrieval
-    # and slightly hurts it -- anchoring on a coarse entity (e.g. an org with many
-    # patents) pulls structurally-adjacent-but-irrelevant docs into the fused pool.
-    # It remains fully implemented and one flag away; re-enable and re-measure on a
-    # richer real graph (fine-grained entities, concept nodes, a learned query->
-    # graph encoder) before trusting it. See sample_outputs/DECK_CLAIM_RECALIBRATION.md.
-    use_graph: bool = False
+    # Every knob below is env-overridable, with the historical hardcoded value as
+    # the default -- an unset environment reproduces the previous behaviour
+    # exactly. The overrides exist because the demo and the eval harness need to
+    # ship a *measured* configuration (e.g. DH_USE_KEYWORD=0) without editing
+    # this file; a config you have to edit to reconfigure is a config that drifts
+    # from what was actually measured. Defaults are read at instantiation time,
+    # so tests can set the env and construct a fresh RetrievalConfig().
+    top_k_recall: int = field(  # first-stage retrieval depth per signal
+        default_factory=lambda: env_int("DH_TOP_K_RECALL", 50))
+    top_k_rerank: int = field(  # after cross-encoder rerank
+        default_factory=lambda: env_int("DH_TOP_K_RERANK", 10))
+    min_confidence: float = field(  # Layer-3 policy gate
+        default_factory=lambda: env_float("DH_MIN_CONFIDENCE", 0.35))
+    # Retrieval is DENSE-ONLY. Both other channels are off, each for its own
+    # measured reason. Slice for every number below: the 123 utility-qrels queries
+    # that are independently LLM-adjudicated (utility qrels n the 853-query judged
+    # set from the PRE-SPLIT label store); relevant = grade >= 2; pool budget 100.
+    # Reproduced the deployed pool exactly (RRF = 0.6798) before trusting any of it.
+    #
+    # KEYWORD OFF. RRF(dense,keyword) evicts more good candidates than keyword adds:
+    #   dense top-100 only ............... recall@100 0.7736
+    #   RRF(dense,keyword) -> 100 ........ recall@100 0.6798   <- was production
+    # RRF threw away 578 relevant docs dense had already found, to seat keyword's
+    # 24 unique ones. BM25 is NOT redundant -- it has +0.0520 unique reach, and
+    # union(dense,keyword) hits 0.8256 -- but only at a 200-doc pool, i.e. double
+    # the reranker bill. At the current 100-doc budget, dense-only wins by +0.0937.
+    # Re-open this by raising the pool budget and unioning, NOT by re-enabling RRF.
+    use_keyword: bool = field(
+        default_factory=lambda: env_bool("DH_USE_KEYWORD", False))
+    # GRAPH OFF -- now on direct evidence, not inference. The graph channel's
+    # UNIQUE REACH is exactly zero: across the 62 firing queries (668 relevant docs,
+    # 6,200 graph candidates) it surfaced 0 relevant documents that dense's top-100
+    # missed. Not "few" -- zero. In its full 600,738-doc ranking the median best
+    # rank of ANY relevant doc is 195,898, so no depth and no fusion rescues it.
+    # Root cause is upstream of the R-GCN: entity_link.link_query fires on junk
+    # ("CXCR4 gene therapy approach" -> organization:science approach), so the
+    # channel averages embeddings of unrelated entities. The embedding itself is
+    # sound (held-out link-prediction residual AUC 0.62 after regressing out
+    # degree). Re-open ONLY after build_surface_index precision is measured, not
+    # assumed. See for_ppt_two_bear/graph_unique_reach.json.
+    use_graph: bool = field(default_factory=lambda: env_bool("DH_USE_GRAPH", False))
     rrf_k: int = 60             # RRF damping constant
     bm25_k1: float = 1.5
     bm25_b: float = 0.75

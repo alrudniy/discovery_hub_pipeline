@@ -1,0 +1,47 @@
+nohup: ignoring input
+build_dataset: 66214 query pairs | 603369 docs | n_neg=8 window=[10,60) max_neg_score=0.95 margin=off
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/310 [00:00<?, ?it/s]Loading weights: 100%|██████████| 310/310 [00:00<00:00, 19276.15it/s]
+/home/alex/discovery_hub_pipeline/discovery_hub/embedding.py:133: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self.model.get_sentence_embedding_dimension()
+  search backend: FAISS (603369 vectors)
+  34 shard(s); 34 pending
+  shard    0 (2000 q -> 2000 triples) [1/34, 5.1 shards/min]
+  shard    1 (2000 q -> 2000 triples) [2/34, 5.1 shards/min]
+  shard    2 (2000 q -> 2000 triples) [3/34, 5.1 shards/min]
+  shard    3 (2000 q -> 2000 triples) [4/34, 5.1 shards/min]
+  shard    4 (2000 q -> 2000 triples) [5/34, 5.1 shards/min]
+  shard    5 (2000 q -> 2000 triples) [6/34, 5.1 shards/min]
+  shard    6 (2000 q -> 2000 triples) [7/34, 5.1 shards/min]
+  shard    7 (2000 q -> 2000 triples) [8/34, 5.1 shards/min]
+  shard    8 (2000 q -> 2000 triples) [9/34, 5.1 shards/min]
+  shard    9 (2000 q -> 2000 triples) [10/34, 5.1 shards/min]
+  shard   10 (2000 q -> 2000 triples) [11/34, 5.1 shards/min]
+  shard   11 (2000 q -> 2000 triples) [12/34, 5.1 shards/min]
+  shard   12 (2000 q -> 2000 triples) [13/34, 5.1 shards/min]
+  shard   13 (2000 q -> 2000 triples) [14/34, 5.1 shards/min]
+  shard   14 (2000 q -> 2000 triples) [15/34, 5.1 shards/min]
+  shard   15 (2000 q -> 2000 triples) [16/34, 5.1 shards/min]
+  shard   16 (2000 q -> 2000 triples) [17/34, 5.1 shards/min]
+  shard   17 (2000 q -> 2000 triples) [18/34, 5.1 shards/min]
+  shard   18 (2000 q -> 2000 triples) [19/34, 5.1 shards/min]
+  shard   19 (2000 q -> 2000 triples) [20/34, 5.1 shards/min]
+  shard   20 (2000 q -> 2000 triples) [21/34, 5.1 shards/min]
+  shard   21 (2000 q -> 2000 triples) [22/34, 5.1 shards/min]
+  shard   22 (2000 q -> 2000 triples) [23/34, 5.1 shards/min]
+  shard   23 (2000 q -> 2000 triples) [24/34, 5.1 shards/min]
+  shard   24 (2000 q -> 2000 triples) [25/34, 5.1 shards/min]
+  shard   25 (2000 q -> 2000 triples) [26/34, 5.1 shards/min]
+  shard   26 (2000 q -> 2000 triples) [27/34, 5.1 shards/min]
+  shard   27 (2000 q -> 2000 triples) [28/34, 5.1 shards/min]
+  shard   28 (2000 q -> 2000 triples) [29/34, 5.1 shards/min]
+  shard   29 (2000 q -> 2000 triples) [30/34, 5.1 shards/min]
+  shard   30 (2000 q -> 2000 triples) [31/34, 5.1 shards/min]
+  shard   31 (2000 q -> 2000 triples) [32/34, 5.1 shards/min]
+  shard   32 (2000 q -> 2000 triples) [33/34, 5.1 shards/min]
+  shard   33 (214 q -> 214 triples) [34/34, 5.2 shards/min]
+
+wrote 66214 triples -> /home/alex/discovery_hub/data/finetune/train_triples.jsonl
+  kept 100.0% of queries (rest had no negative pass the guards)
+  mean pos_score=0.568  mean neg_score=0.585  mean margin=-0.018
+  positive appeared in top-10 for 30.8% of queries (sanity: should track your dense Recall@10)

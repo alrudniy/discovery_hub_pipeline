@@ -47,15 +47,23 @@ def _load_retriever_module():
 
 def _confidence(score: float) -> float:
     """
-    Confidence = strength of the top semantic match (dense cosine in [0,1]),
-    clamped. Previously a steep sigmoid over the *blended* retrieval score; after
-    Fix #3 made hybrid the default, that score is the RRF fused rank score (~0.02),
-    which is not a calibrated relevance and drove confidence to ~0.05 -- so the
-    policy gate refused every query. We read confidence off the dense cosine
-    instead (carried on each candidate as ``text_score``). Real deployments should
-    calibrate this against labeled relevance (e.g. Platt scaling on the eval set).
+    Confidence = the cross-encoder reranker's relevance score for the candidate.
+
+    The reranker is the pipeline's most accurate relevance judge (it's the final
+    ranking stage), so its score is the right confidence signal. Earlier versions
+    read the dense cosine (``text_score``) instead, but that badly under-scores
+    candidates surfaced by the keyword/graph arms: e.g. a clinical trial that BM25
+    correctly retrieves for a clinical-language query can sit far from that query in
+    the embedding space (dense cosine ~0.04) while the cross-encoder rightly scores
+    it ~0.9. Reading dense cosine there caused the policy gate to refuse genuine
+    matches. BGE reranker scores are already ~[0,1]; we sigmoid-guard only for any
+    out-of-range value. Real deployments should still calibrate against labeled
+    relevance (e.g. Platt scaling on the eval set).
     """
-    return round(max(0.0, min(1.0, score)), 4)
+    if 0.0 <= score <= 1.0:
+        return round(score, 4)
+    import math
+    return round(1.0 / (1.0 + math.exp(-score)), 4)   # squash raw logits to [0,1]
 
 
 # --------------------------------------------------------------------------- #
@@ -88,9 +96,9 @@ def agent_policy_safety(state: dict) -> dict:
     kept = [c for c in state["candidates"]
             if (c.get("abstract") or "").strip() and c.get("source_url")]
     state["candidates"] = kept
-    # Confidence reads off the dense semantic similarity, not the RRF fused rank
-    # score (see _confidence). Use the strongest available evidence match.
-    top = max((c.get("text_score", 0.0) for c in kept), default=0.0)
+    # Confidence reads the cross-encoder rerank score (the calibrated relevance
+    # signal), not the dense cosine — see _confidence. Use the top candidate's score.
+    top = max((c.get("rerank_score", 0.0) for c in kept), default=0.0)
     state["overall_confidence"] = _confidence(top)
     # Refuse to assert a recommendation we cannot ground / are not confident in.
     if not kept:
@@ -121,7 +129,7 @@ def agent_explanation(state: dict, explain_fn) -> dict:
             "title": c.get("title", ""),
             "why": explain_fn(state["query"], c),
             "citation": c["source_url"],          # every claim carries a citation
-            "confidence": _confidence(c.get("text_score", 0.0)),
+            "confidence": _confidence(c.get("rerank_score", 0.0)),
             "provenance": {"source": c.get("source"),
                            "retrieved_via": "DiscoveryHub/retrieve_rank"},
             "expertise_gap": c["expertise_gap"],
@@ -161,21 +169,59 @@ def run_pipeline(query: str, mock: bool = True, k: int | None = None,
 
 
 def _explain_real_factory():
-    """Returns an explain_fn backed by a self-hosted LLM (vLLM) in strict RAG."""
-    from openai import OpenAI  # vLLM exposes an OpenAI-compatible server
-    client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
+    """Returns an explain_fn backed by the 1min.ai unified chat API, strict RAG.
+
+    Config via env (no hardcoded secrets):
+      DH_LLM_API_KEY   -- 1min.ai API key (required for real mode)
+      DH_LLM_MODEL     -- model name, e.g. 'gpt-4o-mini' (default below)
+      DH_LLM_BASE_URL  -- override endpoint (default https://api.1min.ai)
+    The response text lives at aiRecord.aiRecordDetail.resultObject[0].
+    """
+    import os
+    import requests
+
+    api_key = os.environ.get("DH_LLM_API_KEY")
+    if not api_key:
+        raise RuntimeError("DH_LLM_API_KEY not set; needed for non-mock explanation. "
+                           "Run with mock=True, or export DH_LLM_API_KEY.")
+    model = os.environ.get("DH_LLM_MODEL", "gpt-4o-mini")
+    base = os.environ.get("DH_LLM_BASE_URL", "https://api.1min.ai").rstrip("/")
+    url = f"{base}/api/chat-with-ai"          # non-streaming
+    headers = {"Content-Type": "application/json", "API-KEY": api_key}
 
     def explain(query: str, c: dict) -> str:
         prompt = (
-            "You are a strict-RAG assistant. Using ONLY the evidence below, write "
-            "one sentence on why this technology matches the interest, then cite the "
-            f"source URL in brackets. Do not add facts.\n\nInterest: {query}\n"
-            f"Title: {c.get('title')}\nEvidence: {c.get('abstract')}\n"
+            "You are a strict-RAG assistant for a pharmaceutical technology-scouting "
+            "tool. Using ONLY the evidence below, write ONE concise sentence explaining "
+            "why this record matches the research interest, then cite the source URL in "
+            "square brackets. Do not add any facts not present in the evidence.\n\n"
+            f"Research interest: {query}\n"
+            f"Title: {c.get('title')}\n"
+            f"Evidence: {(c.get('abstract') or '')[:1200]}\n"
             f"Source: {c['source_url']}")
-        resp = client.chat.completions.create(
-            model=config.LLM_MODEL, temperature=0.0, seed=config.SEED,
-            messages=[{"role": "user", "content": prompt}])
-        return resp.choices[0].message.content.strip()
+        payload = {
+            "type": "UNIFY_CHAT_WITH_AI",
+            "model": model,
+            "promptObject": {"prompt": prompt},
+        }
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+            # non-streaming success -> aiRecord.aiRecordDetail.resultObject: [str, ...]
+            result = (data.get("aiRecord", {})
+                          .get("aiRecordDetail", {})
+                          .get("resultObject", []))
+            text = (result[0] if isinstance(result, list) and result else "").strip()
+            if not text:
+                raise ValueError(f"empty resultObject in response: {data}")
+            # strict-RAG guard: guarantee the citation is present even if the model omits it
+            if c["source_url"] not in text:
+                text = f"{text} [source: {c['source_url']}]"
+            return text
+        except Exception as e:
+            # fail safe to the deterministic, cited template rather than dropping the item
+            return _explain_mock(query, c) + f"  (LLM unavailable: {type(e).__name__})"
     return explain
 
 

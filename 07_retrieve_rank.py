@@ -29,8 +29,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 import numpy as np
+
+# Bound GPU memory fragmentation on small (12 GB) cards -- the reranker/embedder
+# "reserved but unallocated" OOM. Set before torch/CUDA initializes; harmless else.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from discovery_hub import config, entity_link
 from discovery_hub.determinism import set_global_determinism
@@ -43,9 +48,14 @@ from discovery_hub.schema import read_docs
 class Retriever:
     def __init__(self, mock: bool = True, device: str | None = None):
         self.mock = mock
+        self.device = device
+        self._cross_encoder = None          # lazy-loaded once, not per query
         self.embedder = get_embedder(mock=mock, device=device)
         self.doc_vectors = np.load(config.EMB_DIR / "doc_vectors.npy")
         self.doc_ids = json.loads((config.INDEX_DIR / "doc_ids.json").read_text())
+        # doc_id -> row in doc_vectors, so any candidate's true dense cosine can be read
+        # back (used to backfill text_score for keyword/graph-sourced candidates).
+        self._docid_to_row = {did: i for i, did in enumerate(self.doc_ids)}
         self.docs = {d.doc_id: d for d in read_docs(config.NORM_DIR / "docs.jsonl")}
 
         # Dense index (FAISS exact if available, else numpy brute force).
@@ -168,6 +178,17 @@ class Retriever:
                  for did, fscore in pool]
 
         cands = self._rerank(query, cands)[:rerank_k]
+        # Backfill the true dense cosine for candidates that surfaced via keyword/graph
+        # (and so were absent from the dense top-k `dense_map`, leaving text_score=0.0).
+        # text_score is the calibrated [0,1] semantic-relevance signal that downstream
+        # confidence reads, so every returned candidate must carry its real cosine, not
+        # 0.0 just because dense wasn't the arm that retrieved it. Vectors are unit-norm
+        # (verified), so dot product == cosine.
+        for c in cands:
+            if not c.get("text_score"):
+                row = self._docid_to_row.get(c["doc_id"])
+                if row is not None:
+                    c["text_score"] = float(self.doc_vectors[row] @ qvec)
         for c in cands:
             d = self.docs.get(c["doc_id"])
             if d:
@@ -178,14 +199,25 @@ class Retriever:
                 c["organizations"] = d.organizations
         return cands
 
+    def _get_cross_encoder(self):
+        """Load the cross-encoder ONCE and cache it. Previously it was constructed
+        per query, reloading ~560M weights every call (slow + fragmented GPU mem).
+        max_length caps input so a long patent/trial abstract can't OOM a batch."""
+        if self._cross_encoder is None:
+            from sentence_transformers import CrossEncoder
+            max_len = getattr(config.RETRIEVAL, "rerank_max_length", 512)
+            self._cross_encoder = CrossEncoder(
+                config.RERANK_MODEL, max_length=max_len, device=self.device)
+        return self._cross_encoder
+
     def _rerank(self, query: str, cands: list[dict]) -> list[dict]:
         if self.mock:
             # Deterministic: fused score, ties broken by doc_id.
             return sorted(cands, key=lambda c: (-c["score"], c["doc_id"]))
-        from sentence_transformers import CrossEncoder
-        ce = CrossEncoder(config.RERANK_MODEL)
+        ce = self._get_cross_encoder()
+        batch_size = getattr(config.RETRIEVAL, "rerank_batch_size", 16)
         pairs = [(query, self.docs[c["doc_id"]].embedding_text) for c in cands]
-        rr = ce.predict(pairs)
+        rr = ce.predict(pairs, batch_size=batch_size)
         for c, s in zip(cands, rr):
             c["rerank_score"] = float(s)
         return sorted(cands, key=lambda c: (-c["rerank_score"], c["doc_id"]))

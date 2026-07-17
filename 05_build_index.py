@@ -44,6 +44,16 @@ def main() -> int:
     vectors = np.load(config.EMB_DIR / "doc_vectors.npy")
     ids = json.loads((config.EMB_DIR / "doc_ids.json").read_text())
     assert vectors.shape[0] == len(ids), "vector/id count mismatch"
+    # Counting rows is not enough: duplicate doc_ids pass the count check and then
+    # collapse in every doc_id-keyed dict downstream (BM25 below, 07's docs/_docid_to_row,
+    # fusion's RRF accumulator). 2,631 SBIR rows vanished from BM25 this way with no error.
+    if len(set(ids)) != len(ids):
+        from collections import Counter
+        dupes = [i for i, n in Counter(ids).items() if n > 1]
+        raise SystemExit(
+            f"FATAL: {len(ids) - len(set(ids))} duplicate doc_ids across {len(dupes)} ids "
+            f"(e.g. {dupes[:3]}). A doc_id-keyed dict will index the last-wins document "
+            "repeatedly and silently drop the rest. Make doc_ids unique before building.")
     dim = vectors.shape[1]
     print(f"Indexing {vectors.shape[0]} vectors of dim {dim}")
 

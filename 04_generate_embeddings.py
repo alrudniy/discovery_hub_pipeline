@@ -61,12 +61,107 @@ def _shard_path(shards_dir: Path, i: int) -> Path:
     return shards_dir / f"shard_{i:05d}.npy"
 
 
+def _shard_manifest_path(shards_dir: Path, i: int) -> Path:
+    return shards_dir / f"shard_{i:05d}.manifest.json"
+
+
 def _shard_indices(n: int, shard_size: int) -> list[int]:
     return list(range((n + shard_size - 1) // shard_size))
 
 
+# --------------------------------------------------------------------------- #
+# Shard provenance -- the fix for a silent, shipped corruption.
+#
+# WHAT HAPPENED. This stage used to resume with:
+#
+#     pending = [i for i in shards if not _shard_path(shards_dir, i).exists()]
+#
+# A shard was skipped because its FILE EXISTED. Nothing recorded which model, which text,
+# or which config wrote it. Re-running with a different checkpoint therefore reused every
+# shard left on disk from the previous run and vstacked old and new into one matrix. The
+# row count still equalled `n`, so the only integrity check below (`vectors.shape[0] != n`)
+# passed and the artifact looked complete.
+#
+# It shipped: 60,000 rows (shards 0-2 = 9.9% of the corpus, 40.7% of all clinical trials)
+# of data/embeddings/doc_vectors.npy were embeddings of documents OTHER than the ones they
+# were indexed under. Serving is dense-only, so those records were unreachable for ANY
+# query. Confirmed by re-embedding every row on an H200 and comparing: cos ~0.00 for rows
+# 0-59,999, ~1.00 for the rest.
+#
+# WHY THE EXISTING GUARDS MISSED IT, precisely. dh2.manifest.doc_order_checksum fingerprints
+# row ORDER and dh2.validate.assert_serving_compat checks counts and dims. This bug leaves
+# order, count AND dim perfectly intact -- it swaps only row CONTENT. `compatible()` returns
+# True; `assert_serving_compat` passes. Those guards are right about what they guard; they
+# simply never bound a shard to the MODEL that wrote it. That binding is what follows, and
+# it is built from those same primitives rather than a competing scheme.
+#
+# The safe default is re-embedding: a shard with no manifest, an unreadable manifest, or a
+# manifest that disagrees with this run is re-embedded, never reused. Existence is not
+# evidence.
+# --------------------------------------------------------------------------- #
+def _shard_stamp(model: str, max_seq_length: int, doc_ids: list[str]) -> dict:
+    """The identity of a shard's work: which model, which config, which documents.
+
+    Deliberately NOT embedding_dim. The dim is a function of the model, and only a worker
+    that has loaded the model knows it -- the parent process would have to guess from
+    config.EMBED_DIM, which on this box still says 1024 while the deployed 4B emits 2560.
+    Comparing a guessed dim would force a full re-embed on every resume. The manifest still
+    RECORDS the real dim (the worker knows it); the reuse decision just doesn't rest on it.
+    """
+    from dh2.manifest import doc_order_checksum
+    return {"base_model": model, "max_sequence_length": max_seq_length,
+            "document_order_checksum": doc_order_checksum(doc_ids),
+            "n_rows": len(doc_ids)}
+
+
+def _write_shard_manifest(shards_dir: Path, i: int, model: str, max_seq_length: int,
+                          dim: int, doc_ids: list[str], batch_size: int) -> None:
+    """Bind this shard to the model and documents that produced it (dh2.manifest)."""
+    from dh2.manifest import write_manifest
+    want = _shard_stamp(model, max_seq_length, doc_ids)
+    write_manifest(_shard_manifest_path(shards_dir, i), artifact_kind="embedding_shard",
+                   base_model=model, max_seq_length=max_seq_length, embedding_dim=dim,
+                   doc_ids=doc_ids, document_prefix="",
+                   query_prefix="(document side: no instruction)",
+                   extra={"shard": i, "batch_size": batch_size, **want})
+    # write_manifest nests our keys under "extra"; hoist the ones the resume check reads so
+    # the comparison is against top-level fields it also writes itself.
+    p = _shard_manifest_path(shards_dir, i)
+    m = json.loads(p.read_text())
+    m.update(want)
+    p.write_text(json.dumps(m, indent=2))
+
+
+def _shard_is_reusable(shards_dir: Path, i: int, want: dict) -> tuple[bool, str]:
+    """A shard may be reused ONLY if it is provably this run's work."""
+    if not _shard_path(shards_dir, i).exists():
+        return False, "no shard file"
+    mpath = _shard_manifest_path(shards_dir, i)
+    if not mpath.exists():
+        return False, ("no manifest -- shard predates provenance stamping and cannot be "
+                       "attributed to any model; re-embedding")
+    try:
+        got = json.loads(mpath.read_text())
+    except Exception as e:                                  # noqa: BLE001
+        return False, f"unreadable manifest ({e})"
+    for k, v in want.items():
+        if got.get(k) != v:
+            return False, f"manifest mismatch on {k}: shard={got.get(k)!r} run={v!r}"
+    return True, "manifest matches this run"
+
+
 def _load_texts(docs_path: Path) -> list[str]:
     return [d.embedding_text for d in read_docs(docs_path)]
+
+
+def _load_ids_and_texts(docs_path: Path) -> tuple[list[str], list[str]]:
+    """One pass for both -- the corpus is 1.5 GB and each worker would otherwise read it
+    twice just to learn which doc_ids its rows belong to."""
+    ids, texts = [], []
+    for d in read_docs(docs_path):
+        ids.append(d.doc_id)
+        texts.append(d.embedding_text)
+    return ids, texts
 
 
 def _worker(device: str, mock: bool, batch_size: int, docs_path: str,
@@ -80,8 +175,10 @@ def _worker(device: str, mock: bool, batch_size: int, docs_path: str,
         # Cap input length so per-batch memory is bounded regardless of a stray
         # very-long abstract (Qwen3 pads each batch to its longest input).
         embedder.model.max_seq_length = max_seq_length
-    texts = _load_texts(Path(docs_path))
+    ids, texts = _load_ids_and_texts(Path(docs_path))
     n = len(texts)
+    model_name = "mock" if mock else config.EMBED_MODEL
+    dim = getattr(embedder, "dim", 0)
     while True:
         i = task_q.get()
         if i is None:                       # sentinel: no more work
@@ -93,6 +190,10 @@ def _worker(device: str, mock: bool, batch_size: int, docs_path: str,
         with open(tmp, "wb") as fh:         # file object -> np.save won't munge the name
             np.save(fh, vecs)
         os.replace(tmp, _shard_path(shards_dir, i))   # atomic: shard appears only when complete
+        # Write the manifest AFTER the shard, and only then: a manifest that exists without
+        # its shard would licence reusing a file that isn't there. Order matters.
+        _write_shard_manifest(shards_dir, i, model_name, max_seq_length, dim, ids[s:e],
+                              batch_size)
         print(f"  [{device}] shard {i:>4} ({e - s} docs) {time.time() - t0:.1f}s", flush=True)
 
 
@@ -128,8 +229,18 @@ def main() -> int:
           f"model={'mock' if args.mock else config.EMBED_MODEL})")
     print(f"  {len(shards)} shard(s) x {args.shard_size}, devices={devices}")
 
-    pending = [i for i in shards if not _shard_path(shards_dir, i).exists()]
-    print(f"  {len(shards) - len(pending)} done, {len(pending)} pending")
+    # Resume on PROVENANCE, not on file existence. See the _shard_stamp block above: the
+    # old `not _shard_path(...).exists()` shipped 60,000 rows of another model's vectors.
+    model_name = "mock" if args.mock else config.EMBED_MODEL
+    pending, reused = [], []
+    for i in shards:
+        s, e = i * args.shard_size, min(i * args.shard_size + args.shard_size, n)
+        want = _shard_stamp(model_name, args.max_seq_length, ids[s:e])
+        ok, why = _shard_is_reusable(shards_dir, i, want)
+        (reused if ok else pending).append(i)
+        if not ok and _shard_path(shards_dir, i).exists():
+            print(f"  shard {i:>4}: RE-EMBEDDING -- {why}")
+    print(f"  {len(reused)} reusable (manifest verified), {len(pending)} pending")
 
     if pending:
         mp.set_start_method("spawn", force=True)       # required for CUDA in children
